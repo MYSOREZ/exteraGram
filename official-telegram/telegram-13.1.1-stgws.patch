@@ -1770,10 +1770,18 @@ index de2413c..9479e71 100644
              titleView.setLineSpacing(dp(2), 1.0f);
              addView(titleView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 32, 0, 32, 0));
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ProxyListActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/ProxyListActivity.java
-index d222504..f6402df 100644
+index d222504..5b9aa33 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/ProxyListActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/ProxyListActivity.java
-@@ -362,6 +362,11 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
+@@ -96,6 +96,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
+     private int proxyEndRow;
+     @Keep
+     private int proxyAddRow;
++    private int tgwsRow;
+     private int proxyShadowRow;
+     private int rotationRow;
+     private int rotationTimeoutRow;
+@@ -362,6 +363,11 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
          actionBar.setBackButtonDrawable(new BackDrawable(false));
          actionBar.setAllowOverlayTitle(true);
          actionBar.setTitle(getString(R.string.ProxySettings));
@@ -1785,6 +1793,52 @@ index d222504..f6402df 100644
          if (parentLayout != null && parentLayout.isLayersLayout()) {
              actionBar.setOccupyStatusBar(false);
          }
+@@ -466,6 +472,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
+                 ConnectionsManager.setProxySettings(useProxySettings, SharedConfig.currentProxy.settings);
+             } else if (position == proxyAddRow) {
+                 presentFragment(new ProxySettingsActivity());
++            } else if (position == tgwsRow) {
++                org.telegram.messenger.tgws.TgwsDiag.show(ProxyListActivity.this);
+             } else if (position == deleteAllRow) {
+                 AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+                 builder.setMessage(getString(R.string.DeleteAllProxiesConfirm));
+@@ -656,6 +664,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
+             proxyEndRow = -1;
+         }
+         proxyAddRow = rowCount++;
++        tgwsRow = rowCount++;
+         proxyShadowRow = rowCount++;
+         if (proxyList.size() >= 10) {
+             deleteAllRow = rowCount++;
+@@ -839,7 +848,9 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
+                     TextSettingsCell textCell = (TextSettingsCell) holder.itemView;
+                     textCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+                     if (position == proxyAddRow) {
+-                        textCell.setText(getString(R.string.AddProxy), deleteAllRow != -1);
++                        textCell.setText(getString(R.string.AddProxy), true);
++                    } else if (position == tgwsRow) {
++                        textCell.setText("sTGWS — состояние и журнал", false);
+                     } else if (position == deleteAllRow) {
+                         textCell.setTextColor(Theme.getColor(Theme.key_text_RedRegular));
+                         textCell.setText(getString(R.string.DeleteAllProxies), false);
+@@ -937,7 +948,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
+         @Override
+         public boolean isEnabled(RecyclerView.ViewHolder holder) {
+             int position = holder.getAdapterPosition();
+-            return position == useProxyRow || position == rotationRow || position == proxyAddRow || position == deleteAllRow || position >= proxyStartRow && position < proxyEndRow;
++            return position == useProxyRow || position == rotationRow || position == proxyAddRow || position == tgwsRow || position == deleteAllRow || position >= proxyStartRow && position < proxyEndRow;
+         }
+ 
+         @Override
+@@ -1008,7 +1019,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
+         public int getItemViewType(int position) {
+             if (position == useProxyShadowRow || position == proxyShadowRow) {
+                 return VIEW_TYPE_SHADOW;
+-            } else if (position == proxyAddRow || position == deleteAllRow) {
++            } else if (position == proxyAddRow || position == tgwsRow || position == deleteAllRow) {
+                 return VIEW_TYPE_TEXT_SETTING;
+             } else if (position == useProxyRow || position == rotationRow) {
+                 return VIEW_TYPE_TEXT_CHECK;
 diff --git a/TMessagesProj_AppStandalone/build.gradle b/TMessagesProj_AppStandalone/build.gradle
 index e4a99f9..db83079 100644
 --- a/TMessagesProj_AppStandalone/build.gradle
