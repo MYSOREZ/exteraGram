@@ -297,6 +297,7 @@ public final class Tgws {
                 return port;
             } catch (Throwable e) {
                 FileLog.e(e);
+                log("start FAIL: " + e);
                 server = null;
                 port = 0;
                 return 0;
@@ -349,6 +350,16 @@ public final class Tgws {
         directOk.clear();
         cooldown.clear();
         requestPick(2000);
+    }
+
+    /** Подбор заново по просьбе человека: забываем отказы и прямые ДЦ, меряем всё снова. */
+    public static void forcePick() {
+        if (ensureStarted() == 0) {
+            return;
+        }
+        directOk.clear();
+        cooldown.clear();
+        requestPick(0);
     }
 
     private static void requestPick(long delayMs) {
@@ -455,12 +466,11 @@ public final class Tgws {
             out.write(new byte[]{5, 0, 0, 1, 0, 0, 0, 0, 0, 0});
             out.flush();
 
+            statConns.incrementAndGet();
             byte[] init = readN(in, TgwsMtproto.INIT_LEN);
             route(client, in, out, host, dstPort, init);
         } catch (Throwable e) {
-            if (BuildVars.LOGS_ENABLED) {
-                FileLog.d("tgws: " + e);
-            }
+            log("conn: " + e);
         } finally {
             TgwsWebSocket.closeQuietly(client);
         }
@@ -478,6 +488,8 @@ public final class Tgws {
             }
         }
         if (info == null || dc == null) {
+            log("pass-through " + host + ":" + dstPort + (info == null ? " (not mtproto)" : " (unknown dc)"));
+            statDirect.incrementAndGet();
             // Не MTProto или неизвестный адрес (например, CDN) — как есть.
             relayDirect(client, in, out, host, dstPort, init, 0);
             return;
@@ -492,6 +504,7 @@ public final class Tgws {
 
         Long ok = directOk.get(wsDc);
         if (ok != null && ok > System.currentTimeMillis()) {
+            statDirect.incrementAndGet();
             relayDirect(client, in, out, host, dstPort, init, wsDc);
             return;
         }
@@ -509,19 +522,24 @@ public final class Tgws {
             }
             TgwsWebSocket ws;
             attempts++;
+            long t0 = System.currentTimeMillis();
             try {
                 ws = TgwsWebSocket.connect(h, WS_TIMEOUT);
-            } catch (IOException e) {
+            } catch (Exception e) {
                 cooldown.put(h, System.currentTimeMillis() + FAIL_COOLDOWN_MS);
-                log("ws " + h + " failed: " + e.getMessage());
+                statWsFail.incrementAndGet();
+                log("ws " + h + " FAIL: " + e);
                 continue;
             }
             cooldown.remove(h);
+            statWsOk.incrementAndGet();
+            log("dc" + wsDc + (dc.media ? "m" : "") + " (" + host + ") -> " + h + " ok " + (System.currentTimeMillis() - t0) + "ms");
             relayWs(client, in, out, ws, patched, info.proto);
             return;
         }
         // Не ответил никто — пусть хотя бы попробует как есть.
         log("dc" + wsDc + ": no websocket route, going direct");
+        statDirect.incrementAndGet();
         relayDirect(client, in, out, host, dstPort, init, 0);
     }
 
@@ -674,6 +692,7 @@ public final class Tgws {
     private static void pick() throws Exception {
         long started = System.currentTimeMillis();
         status = "подбор…";
+        log("pick: start");
         refreshDomainList();
 
         // Фаза 0: какие ДЦ отвечают напрямую.
@@ -685,6 +704,9 @@ public final class Tgws {
         int directCount = 0;
         for (Future<Result> f : fs) {
             Result r = get(f);
+            if (r != null) {
+                log("pick: direct dc" + r.dc + (r.ok ? " OK " : " closed ") + r.ms + "ms");
+            }
             if (r != null && r.ok) {
                 directOk.put(r.dc, System.currentTimeMillis() + DIRECT_COOLDOWN_MS * 6);
                 directCount++;
@@ -946,9 +968,51 @@ public final class Tgws {
         return b;
     }
 
+    // ---- диагностика -------------------------------------------------------------------
+    //
+    // Журнал в памяти пишется всегда, а не только при включённых логах: смотреть его будут на
+    // телефоне, где включать отладку некогда и неоткуда.
+
+    private static final AtomicInteger statConns = new AtomicInteger();
+    private static final AtomicInteger statWsOk = new AtomicInteger();
+    private static final AtomicInteger statWsFail = new AtomicInteger();
+    private static final AtomicInteger statDirect = new AtomicInteger();
+    private static final java.util.ArrayDeque<String> journal = new java.util.ArrayDeque<>();
+
     private static void log(String s) {
+        String line = new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(new java.util.Date()) + " " + s;
+        synchronized (journal) {
+            journal.addLast(line);
+            while (journal.size() > 40) {
+                journal.removeFirst();
+            }
+        }
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d("tgws: " + s);
         }
+    }
+
+    /** Всё о мосте одним текстом — для окна диагностики и копирования. */
+    public static String getDiagnostics() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("sTGWS: ").append(isEnabled() ? "включён" : "выключен");
+        sb.append(", порт ").append(port == 0 ? "—" : String.valueOf(port)).append('\n');
+        sb.append("Карта: ").append(status).append('\n');
+        sb.append("Соединений: ").append(statConns.get())
+                .append(", WS ок: ").append(statWsOk.get())
+                .append(", WS ошибок: ").append(statWsFail.get())
+                .append(", напрямую: ").append(statDirect.get()).append('\n');
+        sb.append("Домены: ");
+        List<String> d = domains;
+        for (int i = 0; i < Math.min(5, d.size()); i++) {
+            sb.append(i == 0 ? "" : ", ").append(d.get(i));
+        }
+        sb.append("\n\nЖурнал:\n");
+        synchronized (journal) {
+            for (String l : journal) {
+                sb.append(l).append('\n');
+            }
+        }
+        return sb.toString();
     }
 }

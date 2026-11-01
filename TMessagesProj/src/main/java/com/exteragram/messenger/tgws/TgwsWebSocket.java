@@ -92,6 +92,20 @@ final class TgwsWebSocket {
         SSLSocketFactory f = HttpsURLConnection.getDefaultSSLSocketFactory();
         SSLSocket s = (SSLSocket) f.createSocket(raw, host, 443, true);
         s.setUseClientMode(true);
+        // SNI обязателен: без имени в ClientHello Cloudflare не знает, чей сертификат отдать,
+        // и рвёт рукопожатие. Ставим его явно — обоими способами, какой сработает на прошивке.
+        try {
+            s.getClass().getMethod("setHostname", String.class).invoke(s, host);
+        } catch (Throwable ignore) {
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 24) {
+            try {
+                javax.net.ssl.SSLParameters p = s.getSSLParameters();
+                p.setServerNames(java.util.Collections.singletonList(new javax.net.ssl.SNIHostName(host)));
+                s.setSSLParameters(p);
+            } catch (Throwable ignore) {
+            }
+        }
         s.startHandshake();
         HostnameVerifier hv = HttpsURLConnection.getDefaultHostnameVerifier();
         if (!hv.verify(host, s.getSession())) {

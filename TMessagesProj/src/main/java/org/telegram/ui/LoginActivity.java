@@ -2218,6 +2218,11 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
 
             addView(proxySettings, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.BOTTOM, 16, 15, 16, 16));
             proxySettings.setOnClickListener(view -> presentFragment(new ProxyListActivity()));
+            // Долгое нажатие — состояние встроенного sTGWS: что подобрано, что отвечает, ошибки.
+            proxySettings.setOnLongClickListener(view -> {
+                showTgwsDiagnostics();
+                return true;
+            });
 
             int bottomMargin = 72;
             if (newAccount && activityMode == MODE_LOGIN) {
@@ -8276,5 +8281,19 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         if (id == NotificationCenter.didUpdateConnectionState) {
             updateProxyButton(true, false);
         }
+    }
+
+    private void showTgwsDiagnostics() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        String text = com.exteragram.messenger.tgws.Tgws.getDiagnostics();
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle("sTGWS");
+        builder.setMessage(text);
+        builder.setPositiveButton("Копировать", (d, w) -> AndroidUtilities.addToClipboard(text));
+        builder.setNeutralButton("Перепроверить", (d, w) -> com.exteragram.messenger.tgws.Tgws.forcePick());
+        builder.setNegativeButton(LocaleController.getString("Close", R.string.Close), null);
+        showDialog(builder.create());
     }
 }
