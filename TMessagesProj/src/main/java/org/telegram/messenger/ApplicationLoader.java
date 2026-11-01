@@ -162,6 +162,7 @@ public class ApplicationLoader extends Application {
 
                     }
 
+                    com.exteragram.messenger.tgws.Tgws.onNetworkChanged();
                     boolean isSlow = isConnectionSlow();
                     for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                         ConnectionsManager.getInstance(a).checkConnection();

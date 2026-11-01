@@ -439,6 +439,8 @@ public class ConnectionsManager extends BaseController {
 
         if (preferences.getBoolean("proxy_enabled", false) && !TextUtils.isEmpty(proxyAddress)) {
             native_setProxySettings(currentAccount, proxyAddress, proxyPort, proxyUsername, proxyPassword, proxySecret);
+        } else if (com.exteragram.messenger.tgws.Tgws.isEnabled() && com.exteragram.messenger.tgws.Tgws.ensureStarted() > 0) {
+            native_setProxySettings(currentAccount, com.exteragram.messenger.tgws.Tgws.HOST, com.exteragram.messenger.tgws.Tgws.getPort(), com.exteragram.messenger.tgws.Tgws.getUser(), com.exteragram.messenger.tgws.Tgws.getPass(), "");
         }
         String installer = "";
         try {
@@ -723,6 +725,7 @@ public class ConnectionsManager extends BaseController {
             buff.reused = true;
             final TLRPC.TL_config message = TLRPC.TL_config.TLdeserialize(buff, buff.readInt32(true), true);
             if (message != null) {
+                com.exteragram.messenger.tgws.Tgws.learnConfig(message);
                 Utilities.stageQueue.postRunnable(() -> AccountInstance.getInstance(currentAccount).getMessagesController().updateConfig(message));
             }
         } catch (Exception e) {
@@ -751,6 +754,9 @@ public class ConnectionsManager extends BaseController {
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
             if (enabled && !TextUtils.isEmpty(address)) {
                 native_setProxySettings(a, address, port, username, password, secret);
+            } else if (com.exteragram.messenger.tgws.Tgws.isEnabled() && com.exteragram.messenger.tgws.Tgws.ensureStarted() > 0) {
+                // Свой прокси выключен — Telegram идёт через встроенный sTGWS.
+                native_setProxySettings(a, com.exteragram.messenger.tgws.Tgws.HOST, com.exteragram.messenger.tgws.Tgws.getPort(), com.exteragram.messenger.tgws.Tgws.getUser(), com.exteragram.messenger.tgws.Tgws.getPass(), "");
             } else {
                 native_setProxySettings(a, "", 1080, "", "", "");
             }
