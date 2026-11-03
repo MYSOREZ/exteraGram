@@ -19,6 +19,11 @@
 - **Только непрочитанные** и **Рабочий режим уведомлений** (уведомления только из «Работы» и
   при упоминании) — в меню ⋮ вкладки.
 - Выбор хранится локально на телефоне, по аккаунтам.
+- **Режим «Рабочий» (по умолчанию) / «Обычный»** — первая строка Настроек или ⋮ во «Работе».
+  В рабочем: старт на «Работе», скрыты истории, Premium/Звёзды/Подарки/Business/кошелёк,
+  нет рекламы в каналах. В обычном — всё как в Telegram.
+- **Свой экран входа** TeleDelta вместо карусели Telegram; вход без Play Integrity; ошибки
+  входа показываются текстом и пишутся в журнал sTGWS.
 
 Код: `org.telegram.messenger.teledelta`, `org.telegram.ui.teledelta`; правки в
 `MainTabsActivity`, `DialogsActivity`, `DialogsAdapter`, `UsersSelectActivity`,
@@ -30,6 +35,8 @@
 git clone --recursive --shallow-submodules https://github.com/DrKLO/Telegram.git tg
 cd tg && git checkout 3de37c8cfb039452be7398909461da6288babf15 && git submodule update --init --recursive --depth 1
 git apply ../teledelta/teledelta-13.1.1.patch
+# свои ключи с https://my.telegram.org — в TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
+# (APP_ID и APP_HASH); в репозитории их нет намеренно
 cp ../TMessagesProj/config/stgws.jks TMessagesProj/config/
 ./gradlew :TMessagesProj_AppStandalone:assembleAfatStandalone
 ```
