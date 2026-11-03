@@ -1,12 +1,11 @@
-# TeleDelta — Telegram для работы со встроенным sTGWS (на базе официального Telegram for Android)
+# Telegram sTGWS (на базе официального Telegram for Android)
 
 exteraGram 9.6.6 сервер Telegram больше не пускает ко входу (ошибка 406 `UPDATE_APP_TO_LOGIN`,
 которую старый код молча глотает). Поэтому рабочая сборка — официальный клиент со встроенным
 мостом sTGWS.
 
 - База: https://github.com/DrKLO/Telegram, коммит `3de37c8cfb039452be7398909461da6288babf15` (13.1.1).
-- Пакет `org.telegram.stgws`, название «TeleDelta», иконка Delta, только arm64.
-- Вкладка «Работа» посередине (открывается при запуске): выбранные рабочие чаты + личные переписки; код в `org.telegram.messenger.teledelta` и `org.telegram.ui.teledelta`.
+- Пакет `org.telegram.stgws`, название «Telegram sTGWS», только arm64.
 - Подпись: `TMessagesProj/config/stgws.jks` из этого репозитория (пароль `stgwspass`, alias `stgws`).
 - Диагностика: долгое нажатие на заголовок «Ваш номер телефона» или на заголовок экрана «Прокси».
 
