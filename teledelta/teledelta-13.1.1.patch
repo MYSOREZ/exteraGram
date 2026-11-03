@@ -39,7 +39,7 @@ index 5405be7..61d8fd3 100644
                      for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                          ConnectionsManager.getInstance(a).checkConnection();
 diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/LocaleController.java b/TMessagesProj/src/main/java/org/telegram/messenger/LocaleController.java
-index 8074337..1711b91 100644
+index 8074337..0edc8c5 100644
 --- a/TMessagesProj/src/main/java/org/telegram/messenger/LocaleController.java
 +++ b/TMessagesProj/src/main/java/org/telegram/messenger/LocaleController.java
 @@ -4442,6 +4442,10 @@ public class LocaleController {
@@ -47,7 +47,7 @@ index 8074337..1711b91 100644
      @Nullable
      private String getStringV2(String key, @StringRes int stringRes, String fallback) {
 +        // TeleDelta: имя приложения не берём из облачных переводов — там всюду «Telegram».
-+        if (stringRes == R.string.AppName || "AppName".equals(key)) {
++        if (stringRes == R.string.AppName || "AppName".equals(key) || stringRes == R.string.Page1Title || "Page1Title".equals(key)) {
 +            return org.telegram.messenger.teledelta.TeleDeltaWork.APP_NAME;
 +        }
          final Context context = ApplicationLoader.applicationContext;
@@ -353,10 +353,10 @@ index 0000000..4d791c3
 +}
 diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/tgws/Tgws.java b/TMessagesProj/src/main/java/org/telegram/messenger/tgws/Tgws.java
 new file mode 100644
-index 0000000..4c39829
+index 0000000..6e9b3c9
 --- /dev/null
 +++ b/TMessagesProj/src/main/java/org/telegram/messenger/tgws/Tgws.java
-@@ -0,0 +1,1018 @@
+@@ -0,0 +1,1023 @@
 +package org.telegram.messenger.tgws;
 +
 +import android.app.Activity;
@@ -1351,6 +1351,11 @@ index 0000000..4c39829
 +        }
 +    }
 +
++    /** Запись в журнал моста извне — например, что ответил сервер на вход. */
++    public static void note(String s) {
++        log(s);
++    }
++
 +    /** Всё о мосте одним текстом — для окна диагностики и копирования. */
 +    public static String getDiagnostics() {
 +        StringBuilder sb = new StringBuilder();
@@ -2212,7 +2217,7 @@ index 48ec85b..1405405 100644
          final LaunchActivity launchActivity;
          if (activity instanceof LaunchActivity) {
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/LoginActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/LoginActivity.java
-index de2413c..9479e71 100644
+index de2413c..2109933 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/LoginActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/LoginActivity.java
 @@ -2022,6 +2022,11 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
@@ -2227,6 +2232,50 @@ index de2413c..9479e71 100644
              titleView.setGravity(Gravity.CENTER);
              titleView.setLineSpacing(dp(2), 1.0f);
              addView(titleView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 32, 0, 32, 0));
+@@ -2858,6 +2863,8 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
+         @Override
+         public void onNextPressed(String code) {
+             if (getParentActivity() == null || nextPressed || isRequestingFirebaseSms) {
++                // TeleDelta: в журнал — почему нажатие ничего не сделало.
++                org.telegram.messenger.tgws.Tgws.note("login: next ignored (nextPressed=" + nextPressed + ", firebase=" + isRequestingFirebaseSms + ")");
+                 return;
+             }
+ 
+@@ -3083,6 +3090,9 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
+             if (forceDisableSafetyNet || TextUtils.isEmpty(BuildVars.SAFETYNET_KEY)) {
+                 settings.allow_firebase = false;
+             }
++            // TeleDelta: проверка Play Integrity выдаётся только официальному пакету Telegram —
++            // для нашего она не приходит никогда, и вход зависал. Код придёт обычным путём.
++            settings.allow_firebase = false;
+ 
+             ArrayList<TLRPC.TL_auth_authorization> loginTokens = AuthTokensHelper.getSavedLogInTokens();
+             if (loginTokens != null) {
+@@ -3236,14 +3246,23 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
+                         } else if (error.text.startsWith("FLOOD_WAIT")) {
+                             needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), getString("FloodWait", R.string.FloodWait));
+                         } else if (error.code != -1000) {
+-                            AlertsCreator.processError(currentAccount, error, LoginActivity.this, req, phoneInputData.phoneNumber);
++                            // TeleDelta: ошибка, которую стандартный обработчик глотает молча (406 и
++                            // прочие), показывается текстом — иначе кнопка «не работает» без объяснений.
++                            if (AlertsCreator.processError(currentAccount, error, LoginActivity.this, req, phoneInputData.phoneNumber) == null) {
++                                needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), "Сервер ответил: " + error.code + " " + error.text);
++                            }
+                         }
+                     }
++                    org.telegram.messenger.tgws.Tgws.note("login: sendCode error " + error.code + " " + error.text);
++                }
++                if (error == null) {
++                    org.telegram.messenger.tgws.Tgws.note("login: sendCode ok " + (response == null ? "null" : response.getClass().getSimpleName()));
+                 }
+                 if (!isRequestingFirebaseSms) {
+                     needHideProgress(false);
+                 }
+             }), ConnectionsManager.RequestFlagFailOnServerErrors | ConnectionsManager.RequestFlagWithoutLogin | ConnectionsManager.RequestFlagTryDifferentDc | ConnectionsManager.RequestFlagEnableUnauthorized);
++            org.telegram.messenger.tgws.Tgws.note("login: sendCode sent");
+             needShowProgress(reqId);
+         }
+ 
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/MainTabsActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/MainTabsActivity.java
 index 8f1a10b..b6af4eb 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/MainTabsActivity.java
