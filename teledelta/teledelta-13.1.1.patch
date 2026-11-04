@@ -85,10 +85,10 @@ index ac2f0cb..a3a316a 100644
                      isChannel = messageObject.localChannel;
 diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/teledelta/TeleDeltaWork.java b/TMessagesProj/src/main/java/org/telegram/messenger/teledelta/TeleDeltaWork.java
 new file mode 100644
-index 0000000..2bb4a11
+index 0000000..2208969
 --- /dev/null
 +++ b/TMessagesProj/src/main/java/org/telegram/messenger/teledelta/TeleDeltaWork.java
-@@ -0,0 +1,299 @@
+@@ -0,0 +1,300 @@
 +package org.telegram.messenger.teledelta;
 +
 +import android.content.Context;
@@ -354,6 +354,7 @@ index 0000000..2bb4a11
 +                NotificationCenter.getInstance(a).postNotificationName(NotificationCenter.storiesUpdated);
 +            }
 +        }
++        org.telegram.ui.DialogsActivity.notifyTeleDeltaProfileChanged();
 +    }
 +
 +    // ---- рабочий режим уведомлений ----------------------------------------------------------
@@ -2109,7 +2110,7 @@ index 778af48..d9bad06 100644
                  native_setProxySettings(a, "", 1080, "", "", "");
              }
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/Adapters/DialogsAdapter.java b/TMessagesProj/src/main/java/org/telegram/ui/Adapters/DialogsAdapter.java
-index cd393c4..b9873f3 100644
+index cd393c4..358c9e5 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/Adapters/DialogsAdapter.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/Adapters/DialogsAdapter.java
 @@ -1632,7 +1632,11 @@ public class DialogsAdapter extends RecyclerListView.SelectionAdapter implements
@@ -2117,7 +2118,7 @@ index cd393c4..b9873f3 100644
          }
  
 -        if (!hasHints && dialogsType == 0 && folderId == 0 && messagesController.isDialogsEndReached(folderId) && !forceUpdatingContacts) {
-+        final boolean teledeltaWork = parentFragment != null && parentFragment.workMode;
++        final boolean teledeltaWork = parentFragment != null && parentFragment.isWorkFiltered();
 +        if (teledeltaWork) {
 +            onlineContacts = null;
 +        }
@@ -2147,38 +2148,87 @@ index 4429525..8fdaa4e 100644
          GRAM(R.raw.gram, R.raw.gram_reverse),
  
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java
-index 48ec85b..f5b362d 100644
+index 48ec85b..fd9fb38 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java
-@@ -544,6 +544,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -544,6 +544,53 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
      public long replyMessageAuthor;
      public long forwardOriginalChannel;
      private int initialDialogsType;
-+    /** TeleDelta: вкладка «Работа» — тот же список, но только рабочие чаты. */
-+    public boolean workMode;
++    // ---- TeleDelta: профили «Рабочий» / «Обычный» ------------------------------------------
++    //
++    // В рабочем профиле главный список чатов показывает только выбранные рабочие чаты; во всех
++    // остальных случаях (выбор чата для пересылки, архив, сообщества, поиск) — как обычно.
++    private static final java.util.ArrayList<java.lang.ref.WeakReference<DialogsActivity>> teledeltaInstances = new java.util.ArrayList<>();
++
++    public boolean isWorkFiltered() {
++        return org.telegram.messenger.teledelta.TeleDeltaWork.isWorkMode() && !onlySelect && initialDialogsType == DIALOGS_TYPE_DEFAULT
++                && folderId == 0 && communityId == 0 && searchString == null;
++    }
++
++    /** Профиль сменился — перестроить список, вкладки папок, заголовок и истории без перезапуска. */
++    public static void notifyTeleDeltaProfileChanged() {
++        AndroidUtilities.runOnUIThread(() -> {
++            for (int i = teledeltaInstances.size() - 1; i >= 0; i--) {
++                DialogsActivity a = teledeltaInstances.get(i).get();
++                if (a == null) {
++                    teledeltaInstances.remove(i);
++                    continue;
++                }
++                a.onTeleDeltaProfileChanged();
++            }
++        });
++    }
++
++    private void onTeleDeltaProfileChanged() {
++        if (fragmentView == null) {
++            return;
++        }
++        updateFilterTabs(true, true);
++        updateTeleDeltaTitle();
++        updateStoriesVisibility(true);
++        if (viewPages != null) {
++            for (ViewPage page : viewPages) {
++                if (page != null && page.dialogsAdapter != null) {
++                    page.dialogsAdapter.notifyDataSetChanged();
++                }
++            }
++        }
++    }
++
++    private void updateTeleDeltaTitle() {
++        if (actionBar == null || onlySelect || initialDialogsType != DIALOGS_TYPE_DEFAULT || folderId != 0 || communityId != 0 || searchString != null) {
++            return;
++        }
++        actionBar.setTitle(isWorkFiltered() ? "Работа" : getString(R.string.AppName), statusDrawable);
++    }
  
      private boolean checkingImportDialog;
  
-@@ -2839,6 +2841,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
-             canSelectTopics = arguments.getBoolean("canSelectTopics", false);
-             cantSendToChannels = arguments.getBoolean("cantSendToChannels", false);
-             initialDialogsType = arguments.getInt("dialogsType", DIALOGS_TYPE_DEFAULT);
-+            workMode = arguments.getBoolean("teledeltaWork", false);
-             isQuote = arguments.getBoolean("quote", false);
-             isReplyTo = arguments.getBoolean("reply_to", false);
-             replyMessageAuthor = arguments.getLong("reply_to_author", 0L);
-@@ -3500,7 +3503,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
-             if (searchString != null || folderId != 0 || communityId != 0) {
-                 actionBar.setBackButtonDrawable(backDrawable = new BackDrawable(false));
-             }
--            if (folderId != 0) {
-+            if (workMode) {
-+                actionBar.setTitle("Работа");
-+            } else if (folderId != 0) {
-                 actionBar.setTitle(getString(R.string.ArchivedChats));
-             } else if (communityId != 0) {
-                 actionBar.setTitle(DialogObject.getName(community));
-@@ -3516,8 +3521,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -2832,6 +2879,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+ 
+     @Override
+     public boolean onFragmentCreate() {
++        teledeltaInstances.add(new java.lang.ref.WeakReference<>(this));
+         super.onFragmentCreate();
+ 
+         if (arguments != null) {
+@@ -3450,6 +3498,14 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+                 showItemOptions();
+                 return true;
+             });
++            // TeleDelta: переключатель профиля «Рабочий» / «Обычный» прямо в шапке списка.
++            if (!onlySelect && folderId == 0 && communityId == 0 && searchString == null) {
++                ActionBarMenuItem profileItem = menu.addItem(1900, R.drawable.msg_work);
++                profileItem.setContentDescription("Рабочий / обычный профиль");
++                profileItem.setOnClickListener(v -> org.telegram.ui.teledelta.TeleDeltaWorkUi.switchProfile(this));
++                menu.removeView(profileItem);
++                menu.addView(profileItem, Math.max(0, menu.indexOfChild(optionsItem)));
++            }
+         }
+ 
+         searchItem.setSearchFieldHint(getString(R.string.Search));
+@@ -3516,9 +3572,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                  logoDrawable = context.getResources().getDrawable(R.drawable.telegram_logo_2).mutate();
                  logoDrawable.setBounds(0, dp(2), logoDrawable.getIntrinsicWidth(), dp(2) + logoDrawable.getIntrinsicHeight());
                  logoDrawable.setColorFilter(getThemedColor(Theme.key_telegram_color_dialogsLogo), PorterDuff.Mode.MULTIPLY);
@@ -2186,28 +2236,31 @@ index 48ec85b..f5b362d 100644
                  SpannableStringBuilder ssb = new SpannableStringBuilder(getString(R.string.AppName));
 -                ssb.setSpan(new ImageSpan(logoDrawable), 0, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                  actionBar.setTitle(ssb, statusDrawable);
++                updateTeleDeltaTitle();
                  updateStatus(UserConfig.getInstance(currentAccount).getCurrentUser(), false);
              }
-@@ -3542,7 +3547,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
-         });
- 
-         if (
--            (initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect || initialDialogsType == DIALOGS_TYPE_FORWARD) &&
-+            !workMode && (initialDialogsType == DIALOGS_TYPE_DEFAULT && !onlySelect || initialDialogsType == DIALOGS_TYPE_FORWARD) &&
-             folderId == 0 && communityId == 0 && TextUtils.isEmpty(searchString)
-         ) {
-             filterTabsView = new FilterTabsView(context, resourceProvider) {
-@@ -7020,6 +7025,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+             if (folderId == 0) {
+@@ -6858,7 +6915,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+             filterOptions = null;
+         }
+         final ArrayList<MessagesController.DialogFilter> filters = getMessagesController().getDialogFilters();
+-        if (filters.size() > 1) {
++        // TeleDelta: в рабочем профиле вкладок папок нет — только рабочий список.
++        if (filters.size() > 1 && !isWorkFiltered()) {
+             if (force || filterTabsView.getVisibility() != View.VISIBLE) {
+                 boolean animatedUpdateItems = animated;
+                 if (filterTabsView.getVisibility() != View.VISIBLE) {
+@@ -7020,6 +7078,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
      @Override
      public void onResume() {
          super.onResume();
-+        if (workMode) {
++        if (isWorkFiltered()) {
 +            org.telegram.ui.teledelta.TeleDeltaWorkUi.onWorkTabResumed(this);
 +        }
          if (dialogStoriesCell != null) {
              dialogStoriesCell.onResume();
          }
-@@ -8770,6 +8778,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -8770,6 +8831,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
              previewMenu[0].addView(unpinItem);
          }
  
@@ -2218,42 +2271,42 @@ index 48ec85b..f5b362d 100644
          if (!DialogObject.isUserDialog(dialogId) || !UserObject.isUserSelf(getMessagesController().getUser(dialogId))) {
              ActionBarMenuSubItem muteItem = new ActionBarMenuSubItem(getParentActivity(), false, false);
              if (!getMessagesController().isDialogMuted(dialogId, 0)) {
-@@ -8897,7 +8909,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -8897,7 +8962,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
      }
  
      public boolean hasHiddenArchive() {
 -        return !onlySelect && initialDialogsType == DIALOGS_TYPE_DEFAULT && communityId == 0 && folderId == 0 && getMessagesController().hasHiddenArchive();
-+        return !workMode && !onlySelect && initialDialogsType == DIALOGS_TYPE_DEFAULT && communityId == 0 && folderId == 0 && getMessagesController().hasHiddenArchive();
++        return !isWorkFiltered() && !onlySelect && initialDialogsType == DIALOGS_TYPE_DEFAULT && communityId == 0 && folderId == 0 && getMessagesController().hasHiddenArchive();
      }
  
      private boolean waitingForDialogsAnimationEnd(ViewPage viewPage) {
-@@ -10994,6 +11006,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -10994,6 +11059,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
              return frozenDialogsList;
          }
          MessagesController messagesController = AccountInstance.getInstance(currentAccount).getMessagesController();
-+        if (workMode && dialogsType == DIALOGS_TYPE_DEFAULT && folderId == 0) {
++        if (isWorkFiltered() && dialogsType == DIALOGS_TYPE_DEFAULT && folderId == 0) {
 +            return org.telegram.messenger.teledelta.TeleDeltaWork.getDialogs(currentAccount);
 +        }
          if (dialogsType == DIALOGS_TYPE_DEFAULT) {
              return messagesController.getDialogs(folderId);
          } else if (dialogsType == DIALOGS_TYPE_WIDGET || dialogsType == DIALOGS_TYPE_IMPORT_HISTORY) {
-@@ -12796,9 +12811,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -12796,9 +12864,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
          if (StoryRecorder.isVisible() || (getLastStoryViewer() != null && getLastStoryViewer().isFullyVisible())) {
              animated = false;
          }
 -        boolean onlySelfStories = !isArchive() && getStoriesController().hasOnlySelfStories();
-+        boolean onlySelfStories = !workMode && !org.telegram.messenger.teledelta.TeleDeltaWork.isWorkMode() && !isArchive() && getStoriesController().hasOnlySelfStories();
++        boolean onlySelfStories = !org.telegram.messenger.teledelta.TeleDeltaWork.isWorkMode() && !isArchive() && getStoriesController().hasOnlySelfStories();
          boolean newVisibility;
 -        if (communityId != 0) {
-+        if (communityId != 0 || workMode || org.telegram.messenger.teledelta.TeleDeltaWork.isWorkMode()) {
++        if (communityId != 0 || org.telegram.messenger.teledelta.TeleDeltaWork.isWorkMode()) {
              newVisibility = false;
          } else if (isArchive()) {
              newVisibility = !getStoriesController().getHiddenList().isEmpty();
-@@ -13677,6 +13692,13 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -13677,6 +13745,13 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
          io.setColors(getThemedColor(Theme.key_actionBarDefaultTitle), getThemedColor(Theme.key_actionBarDefaultTitle));
          io.setDimAlpha(0x08);
  
-+        if (workMode) {
++        if (isWorkFiltered()) {
 +            org.telegram.ui.teledelta.TeleDeltaWorkUi.fillOptions(this, io);
 +            io.show();
 +            io.setTranslationY(-dp(64));
@@ -2346,101 +2399,25 @@ index de2413c..2109933 100644
          }
  
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/MainTabsActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/MainTabsActivity.java
-index 8f1a10b..42a6bf1 100644
+index 8f1a10b..ef94a88 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/MainTabsActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/MainTabsActivity.java
-@@ -90,20 +90,23 @@ import me.vkryl.android.animator.FactorAnimator;
- 
- public class MainTabsActivity extends ViewPagerActivity implements NotificationCenter.NotificationCenterDelegate, FactorAnimator.Target {
- 
--    public static final int TABS_COUNT = 4;
-+    // TeleDelta: посередине — вкладка «Работа», она же открывается при запуске.
-+    public static final int TABS_COUNT = 5;
-     private static final int POSITION_CHATS = 0;
-     private static final int POSITION_CONTACTS = 1;
--    private static final int POSITION_CALLS_OR_SETTINGS = 2;
--    private static final int POSITION_PROFILE = 3;
-+    private static final int POSITION_WORK = 2;
-+    private static final int POSITION_CALLS_OR_SETTINGS = 3;
-+    private static final int POSITION_PROFILE = 4;
- 
-     private static final int INDEX_CHATS = 0;
-     private static final int INDEX_CONTACTS = 1;
--    private static final int INDEX_SETTINGS = 2;
--    private static final int INDEX_CALLS = 3;
--    private static final int INDEX_PROFILE = 4;
-+    private static final int INDEX_WORK = 2;
-+    private static final int INDEX_SETTINGS = 3;
-+    private static final int INDEX_CALLS = 4;
-+    private static final int INDEX_PROFILE = 5;
- 
-     private static int indexToPosition(int index) {
--        return index > 2 ? index - 1 : index;
-+        return index > 3 ? index - 1 : index;
-     }
- 
-     private static final int ANIMATOR_ID_TABS_VISIBLE = 0;
-@@ -309,11 +312,17 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
-         tabsView = new MainTabsLayout(context, resourceProvider);
-         tabsView.setClipChildren(false);
-         tabsView.setPadding(dp(DialogsActivity.MAIN_TABS_MARGIN + 4), dp(DialogsActivity.MAIN_TABS_MARGIN + 4), dp(DialogsActivity.MAIN_TABS_MARGIN + 4), dp(DialogsActivity.MAIN_TABS_MARGIN + 4));
--        tabsView.setMaxWidth(dp(328 + DialogsActivity.MAIN_TABS_MARGIN * 2));
-+        tabsView.setMaxWidth(dp(400 + DialogsActivity.MAIN_TABS_MARGIN * 2));
- 
--        tabs = new GlassTabView[5];
-+        tabs = new GlassTabView[6];
-         tabs[INDEX_CHATS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CHATS, R.string.MainTabsChats);
-         tabs[INDEX_CONTACTS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CONTACTS, R.string.MainTabsContacts);
-+        tabs[INDEX_WORK] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.WORK, R.string.MainTabsChats);
-+        tabs[INDEX_WORK].setText("Работа");
-+        tabs[INDEX_WORK].setOnLongClickListener(v -> {
-+            org.telegram.ui.teledelta.TeleDeltaWorkUi.openPicker(this);
-+            return true;
-+        });
-         tabs[INDEX_SETTINGS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.SETTINGS, R.string.Settings);
-         tabs[INDEX_CALLS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CALLS, R.string.MainTabsCalls);
-         tabs[INDEX_PROFILE] = GlassTabView.createAvatar(context, resourceProvider, currentAccount, R.string.MainTabsProfile);
-@@ -326,6 +335,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
-         tabsView.addTabToIgnoreClick(tabs[INDEX_CONTACTS]);
-         tabsView.addTabToIgnoreClick(tabs[INDEX_PROFILE]);
-         tabsView.addTabToIgnoreClick(tabs[INDEX_CALLS]);
-+        tabsView.addTabToIgnoreClick(tabs[INDEX_WORK]);
- 
-         for (int index = 0; index < tabs.length; index++) {
-             final GlassTabView view = tabs[index];
-@@ -402,6 +412,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
+@@ -402,6 +402,15 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
              return;
          }
  
-+        final int workUnread = org.telegram.messenger.teledelta.TeleDeltaWork.getUnreadChatsCount(currentAccount);
-+        tabs[INDEX_WORK].setCounter(workUnread > 0 ? LocaleController.formatNumber(workUnread, ',') : null, false, animated);
++        // TeleDelta: в рабочем профиле вкладка «Чаты» — это «Работа», и счётчик у неё рабочий.
++        if (org.telegram.messenger.teledelta.TeleDeltaWork.isWorkMode()) {
++            tabs[INDEX_CHATS].setText("Работа");
++            final int workUnread = org.telegram.messenger.teledelta.TeleDeltaWork.getUnreadChatsCount(currentAccount);
++            tabs[INDEX_CHATS].setCounter(workUnread > 0 ? LocaleController.formatNumber(workUnread, ',') : null, false, animated);
++            return;
++        }
++        tabs[INDEX_CHATS].setText(LocaleController.getString(R.string.MainTabsChats));
 +
          final int unreadCount = MessagesStorage.getInstance(currentAccount).getMainUnreadCount();
          if (unreadCount > 0) {
              final String unreadCountFmt = LocaleController.formatNumber(unreadCount, ',');
-@@ -773,7 +786,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
- 
-     @Override
-     protected int getStartPosition() {
--        return POSITION_CHATS;
-+        return org.telegram.messenger.teledelta.TeleDeltaWork.isWorkMode() ? POSITION_WORK : POSITION_CHATS;
-     }
- 
-     private DialogsActivity dialogsActivity;
-@@ -823,6 +836,13 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
-             Bundle args = new Bundle();
-             args.putBoolean("hasMainTabs", true);
-             return new SettingsActivity(args);
-+        } else if (position == POSITION_WORK) {
-+            Bundle args = new Bundle();
-+            args.putBoolean("hasMainTabs", true);
-+            args.putBoolean("teledeltaWork", true);
-+            DialogsActivity work = new DialogsActivity(args);
-+            work.setMainTabsActivityController(new MainTabsActivityControllerImpl());
-+            return work;
-         } else if (position == POSITION_CHATS) {
-             Bundle args = new Bundle();
-             args.putBoolean("hasMainTabs", true);
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ProxyListActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/ProxyListActivity.java
 index d222504..5b9aa33 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/ProxyListActivity.java
@@ -2512,7 +2489,7 @@ index d222504..5b9aa33 100644
              } else if (position == useProxyRow || position == rotationRow) {
                  return VIEW_TYPE_TEXT_CHECK;
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/SettingsActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/SettingsActivity.java
-index d56c57b..f70c4cb 100644
+index d56c57b..b9e8855 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/SettingsActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/SettingsActivity.java
 @@ -701,6 +701,13 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
@@ -2522,8 +2499,8 @@ index d56c57b..f70c4cb 100644
 +        // TeleDelta: режим приложения — первой строкой.
 +        final boolean tdWork = org.telegram.messenger.teledelta.TeleDeltaWork.isWorkMode();
 +        items.add(SettingCell.Factory.of(900, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.msg_work,
-+                tdWork ? "Режим: рабочий" : "Режим: обычный",
-+                tdWork ? "Только нужное для работы. Нажмите, чтобы включить обычный" : "Всё как в Telegram. Нажмите, чтобы включить рабочий"));
++                tdWork ? "Профиль: рабочий" : "Профиль: обычный",
++                tdWork ? "Только рабочие чаты. Нажмите — обычный профиль" : "Все чаты. Нажмите — рабочий профиль"));
 +        items.add(UItem.asShadow(null));
 +
          if (accountNumbers.size() > 0) {
@@ -2585,8 +2562,8 @@ index d56c57b..f70c4cb 100644
 +                org.telegram.messenger.teledelta.TeleDeltaWork.setWorkMode(nowWork);
 +                listView.adapter.update(true);
 +                BulletinFactory.of(this).createSimpleBulletin(R.raw.contact_check, nowWork
-+                        ? "Рабочий режим включён. «Работа» откроется при следующем запуске"
-+                        : "Обычный режим: всё как в Telegram").show();
++                        ? "Рабочий профиль: только рабочие чаты"
++                        : "Обычный профиль: все чаты, как в Telegram").show();
 +                break;
 +            }
              case 1:
@@ -2748,10 +2725,10 @@ index 0000000..7c02a10
 +}
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/teledelta/TeleDeltaWorkUi.java b/TMessagesProj/src/main/java/org/telegram/ui/teledelta/TeleDeltaWorkUi.java
 new file mode 100644
-index 0000000..f97b6c6
+index 0000000..4b305e4
 --- /dev/null
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/teledelta/TeleDeltaWorkUi.java
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,116 @@
 +package org.telegram.ui.teledelta;
 +
 +import org.telegram.messenger.R;
@@ -2785,16 +2762,25 @@ index 0000000..f97b6c6
 +                    : "Уведомления — как обычно, из всех чатов").show();
 +        });
 +        io.addGap();
-+        io.addChecked(TeleDeltaWork.isWorkMode(), "Рабочий режим приложения", () -> {
-+            boolean now = !TeleDeltaWork.isWorkMode();
-+            TeleDeltaWork.setWorkMode(now);
-+            BulletinFactory.of(fragment).createSimpleBulletin(R.raw.contact_check, now
-+                    ? "Рабочий режим: истории, Premium и реклама скрыты"
-+                    : "Обычный режим: всё как в Telegram").show();
-+        });
++        io.add(R.drawable.msg_work, "Перейти в обычный профиль", () -> switchProfile(fragment));
 +    }
 +
 +    private static boolean emptyHintShown;
++
++    /** Переключить профиль «Рабочий» ⇄ «Обычный» — без перезапуска. */
++    public static void switchProfile(BaseFragment fragment) {
++        boolean now = !TeleDeltaWork.isWorkMode();
++        TeleDeltaWork.setWorkMode(now);
++        BulletinFactory.of(fragment).createSimpleBulletin(R.raw.contact_check, now
++                ? "Рабочий профиль: только рабочие чаты"
++                : "Обычный профиль: все чаты, как в Telegram").show();
++        if (now) {
++            emptyHintShown = false;
++            if (fragment instanceof DialogsActivity) {
++                onWorkTabResumed((DialogsActivity) fragment);
++            }
++        }
++    }
 +
 +    /** Пустая «Работа» — подсказать один раз за запуск, как её наполнить. */
 +    public static void onWorkTabResumed(DialogsActivity fragment) {
@@ -2846,7 +2832,7 @@ index 0000000..f97b6c6
 +        });
 +        menu.addView(workItem);
 +
-+        if (fragment.workMode) {
++        if (fragment.isWorkFiltered()) {
 +            final boolean pinned = TeleDeltaWork.isPinned(account, dialogId);
 +            ActionBarMenuSubItem pinItem = new ActionBarMenuSubItem(fragment.getParentActivity(), false, false);
 +            pinItem.setTextAndIcon(pinned ? "Открепить в «Работе»" : "Закрепить в «Работе»", pinned ? R.drawable.msg_unpin : R.drawable.msg_pin);
