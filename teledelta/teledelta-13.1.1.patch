@@ -85,10 +85,10 @@ index ac2f0cb..a3a316a 100644
                      isChannel = messageObject.localChannel;
 diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/teledelta/TeleDeltaWork.java b/TMessagesProj/src/main/java/org/telegram/messenger/teledelta/TeleDeltaWork.java
 new file mode 100644
-index 0000000..2208969
+index 0000000..79484ca
 --- /dev/null
 +++ b/TMessagesProj/src/main/java/org/telegram/messenger/teledelta/TeleDeltaWork.java
-@@ -0,0 +1,300 @@
+@@ -0,0 +1,314 @@
 +package org.telegram.messenger.teledelta;
 +
 +import android.content.Context;
@@ -181,6 +181,20 @@ index 0000000..2208969
 +        synchronized (lock) {
 +            return getIds(account).contains(dialogId);
 +        }
++    }
++
++    /** Добавить в «Работу» (add) или убрать из неё сразу несколько чатов. */
++    public static void setMany(int account, java.util.List<Long> dialogIds, boolean add) {
++        synchronized (lock) {
++            Set<Long> s = getIds(account);
++            if (add) {
++                s.addAll(dialogIds);
++            } else {
++                s.removeAll(dialogIds);
++            }
++            save(account);
++        }
++        changed(account);
 +    }
 +
 +    /** Добавить в «Работу» или убрать из неё. Возвращает новое состояние. */
@@ -2148,10 +2162,10 @@ index 4429525..8fdaa4e 100644
          GRAM(R.raw.gram, R.raw.gram_reverse),
  
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java
-index 48ec85b..fd9fb38 100644
+index 48ec85b..0874f17 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java
-@@ -544,6 +544,53 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -544,6 +544,56 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
      public long replyMessageAuthor;
      public long forwardOriginalChannel;
      private int initialDialogsType;
@@ -2187,6 +2201,9 @@ index 48ec85b..fd9fb38 100644
 +        updateFilterTabs(true, true);
 +        updateTeleDeltaTitle();
 +        updateStoriesVisibility(true);
++        updateFloatingButtonVisibility(true);
++        // Список прокручен под прежнюю шапку (с вкладками папок или без) — вернуть в начало.
++        AndroidUtilities.runOnUIThread(() -> scrollToTop(false, false), 150);
 +        if (viewPages != null) {
 +            for (ViewPage page : viewPages) {
 +                if (page != null && page.dialogsAdapter != null) {
@@ -2205,7 +2222,7 @@ index 48ec85b..fd9fb38 100644
  
      private boolean checkingImportDialog;
  
-@@ -2832,6 +2879,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -2832,6 +2882,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
  
      @Override
      public boolean onFragmentCreate() {
@@ -2213,7 +2230,7 @@ index 48ec85b..fd9fb38 100644
          super.onFragmentCreate();
  
          if (arguments != null) {
-@@ -3450,6 +3498,14 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -3450,6 +3501,14 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                  showItemOptions();
                  return true;
              });
@@ -2228,7 +2245,7 @@ index 48ec85b..fd9fb38 100644
          }
  
          searchItem.setSearchFieldHint(getString(R.string.Search));
-@@ -3516,9 +3572,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -3516,9 +3575,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                  logoDrawable = context.getResources().getDrawable(R.drawable.telegram_logo_2).mutate();
                  logoDrawable.setBounds(0, dp(2), logoDrawable.getIntrinsicWidth(), dp(2) + logoDrawable.getIntrinsicHeight());
                  logoDrawable.setColorFilter(getThemedColor(Theme.key_telegram_color_dialogsLogo), PorterDuff.Mode.MULTIPLY);
@@ -2240,7 +2257,34 @@ index 48ec85b..fd9fb38 100644
                  updateStatus(UserConfig.getInstance(currentAccount).getCurrentUser(), false);
              }
              if (folderId == 0) {
-@@ -6858,7 +6915,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -4760,6 +4820,11 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+                     AccountFrozenAlert.show(currentAccount);
+                     return;
+                 }
++                if (isWorkFiltered()) {
++                    // TeleDelta: в рабочем профиле — добавить уже существующие чаты, а не начинать новый.
++                    org.telegram.ui.teledelta.TeleDeltaWorkUi.openPicker(this);
++                    return;
++                }
+                 openWriteContacts();
+             }
+         });
+@@ -6741,6 +6806,14 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+         archive2Item = actionMode.addItemWithWidth(archive2, R.drawable.msg_archive, dp(48));
+         deleteItem = actionMode.addItemWithWidth(delete, R.drawable.msg_delete, dp(48), LocaleController.getString(R.string.Delete));
+ 
++        // TeleDelta: выделенные чаты — в «Работу» (обычный профиль) или из неё (рабочий).
++        ActionBarMenuItem teledeltaWorkItem = actionMode.addItemWithWidth(1901, R.drawable.msg_work, dp(48), "В «Работу» / из «Работы»");
++        teledeltaWorkItem.setOnClickListener(v -> {
++            org.telegram.ui.teledelta.TeleDeltaWorkUi.applySelection(this, new ArrayList<>(selectedDialogs), !isWorkFiltered());
++            hideActionMode(true);
++        });
++        actionModeViews.add(teledeltaWorkItem);
++
+         ActionBarMenuItem otherItem = actionMode.addItemWithWidth(0, R.drawable.ic_ab_other, dp(48), LocaleController.getString(R.string.AccDescrMoreOptions));
+         actionMode.addView(new View(getContext()), LayoutHelper.createLinear(5, LayoutHelper.MATCH_PARENT));
+         archiveItem = otherItem.addSubItem(archive, R.drawable.msg_archive, LocaleController.getString(R.string.Archive));
+@@ -6858,7 +6931,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
              filterOptions = null;
          }
          final ArrayList<MessagesController.DialogFilter> filters = getMessagesController().getDialogFilters();
@@ -2250,7 +2294,7 @@ index 48ec85b..fd9fb38 100644
              if (force || filterTabsView.getVisibility() != View.VISIBLE) {
                  boolean animatedUpdateItems = animated;
                  if (filterTabsView.getVisibility() != View.VISIBLE) {
-@@ -7020,6 +7078,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -7020,6 +7094,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
      @Override
      public void onResume() {
          super.onResume();
@@ -2260,7 +2304,7 @@ index 48ec85b..fd9fb38 100644
          if (dialogStoriesCell != null) {
              dialogStoriesCell.onResume();
          }
-@@ -8770,6 +8831,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -8770,6 +8847,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
              previewMenu[0].addView(unpinItem);
          }
  
@@ -2271,7 +2315,16 @@ index 48ec85b..fd9fb38 100644
          if (!DialogObject.isUserDialog(dialogId) || !UserObject.isUserSelf(getMessagesController().getUser(dialogId))) {
              ActionBarMenuSubItem muteItem = new ActionBarMenuSubItem(getParentActivity(), false, false);
              if (!getMessagesController().isDialogMuted(dialogId, 0)) {
-@@ -8897,7 +8962,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -8852,7 +8933,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+             floatingButton3.setButtonVisible(isVisible, animated);
+         }
+         if (floatingButtonStories != null) {
+-            floatingButtonStories.setButtonVisible(isVisible, animated);
++            floatingButtonStories.setButtonVisible(isVisible && !org.telegram.messenger.teledelta.TeleDeltaWork.isWorkMode(), animated);
+         }
+     }
+ 
+@@ -8897,7 +8978,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
      }
  
      public boolean hasHiddenArchive() {
@@ -2280,7 +2333,7 @@ index 48ec85b..fd9fb38 100644
      }
  
      private boolean waitingForDialogsAnimationEnd(ViewPage viewPage) {
-@@ -10994,6 +11059,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -10994,6 +11075,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
              return frozenDialogsList;
          }
          MessagesController messagesController = AccountInstance.getInstance(currentAccount).getMessagesController();
@@ -2290,7 +2343,7 @@ index 48ec85b..fd9fb38 100644
          if (dialogsType == DIALOGS_TYPE_DEFAULT) {
              return messagesController.getDialogs(folderId);
          } else if (dialogsType == DIALOGS_TYPE_WIDGET || dialogsType == DIALOGS_TYPE_IMPORT_HISTORY) {
-@@ -12796,9 +12864,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -12796,9 +12880,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
          if (StoryRecorder.isVisible() || (getLastStoryViewer() != null && getLastStoryViewer().isFullyVisible())) {
              animated = false;
          }
@@ -2302,7 +2355,7 @@ index 48ec85b..fd9fb38 100644
              newVisibility = false;
          } else if (isArchive()) {
              newVisibility = !getStoriesController().getHiddenList().isEmpty();
-@@ -13677,6 +13745,13 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -13677,6 +13761,13 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
          io.setColors(getThemedColor(Theme.key_actionBarDefaultTitle), getThemedColor(Theme.key_actionBarDefaultTitle));
          io.setDimAlpha(0x08);
  
@@ -2725,10 +2778,10 @@ index 0000000..7c02a10
 +}
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/teledelta/TeleDeltaWorkUi.java b/TMessagesProj/src/main/java/org/telegram/ui/teledelta/TeleDeltaWorkUi.java
 new file mode 100644
-index 0000000..4b305e4
+index 0000000..19516bb
 --- /dev/null
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/teledelta/TeleDeltaWorkUi.java
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,128 @@
 +package org.telegram.ui.teledelta;
 +
 +import org.telegram.messenger.R;
@@ -2800,6 +2853,18 @@ index 0000000..4b305e4
 +                    "«Работа» пуста. Добавьте чаты: ⋮ → «Выбрать рабочие чаты» или долгое нажатие на чат",
 +                    "Выбрать", () -> openPicker(fragment)).show();
 +        }, 600);
++    }
++
++    /** Кнопка-портфель на панели выделенных чатов. */
++    public static void applySelection(DialogsActivity fragment, java.util.ArrayList<Long> ids, boolean add) {
++        if (ids == null || ids.isEmpty()) {
++            return;
++        }
++        TeleDeltaWork.setMany(fragment.getCurrentAccount(), ids, add);
++        String n = ids.size() == 1 ? "Чат" : "Чатов: " + ids.size() + ",";
++        BulletinFactory.of(fragment).createSimpleBulletin(R.raw.contact_check, add
++                ? (ids.size() == 1 ? "Чат добавлен в «Работу»" : "Добавлено в «Работу»: " + ids.size())
++                : (ids.size() == 1 ? "Чат убран из «Работы»" : "Убрано из «Работы»: " + ids.size())).show();
 +    }
 +
 +    /** Выбор рабочих чатов — тем же экраном, которым Telegram собирает папки. */
