@@ -85,10 +85,10 @@ index ac2f0cb..a3a316a 100644
                      isChannel = messageObject.localChannel;
 diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/teledelta/TeleDeltaWork.java b/TMessagesProj/src/main/java/org/telegram/messenger/teledelta/TeleDeltaWork.java
 new file mode 100644
-index 0000000..88403b7
+index 0000000..2bb4a11
 --- /dev/null
 +++ b/TMessagesProj/src/main/java/org/telegram/messenger/teledelta/TeleDeltaWork.java
-@@ -0,0 +1,297 @@
+@@ -0,0 +1,299 @@
 +package org.telegram.messenger.teledelta;
 +
 +import android.content.Context;
@@ -120,7 +120,8 @@ index 0000000..88403b7
 +
 +    public static final String APP_NAME = "TeleDelta";
 +
-+    private static final int DEFAULT_FLAGS = MessagesController.DIALOG_FILTER_FLAG_CONTACTS | MessagesController.DIALOG_FILTER_FLAG_NON_CONTACTS;
++    // «Работа» — только то, что выбрано вручную: никаких «все личные переписки» по типу.
++    private static final int DEFAULT_FLAGS = 0;
 +
 +    private static final Object lock = new Object();
 +    @SuppressWarnings("unchecked")
@@ -163,7 +164,8 @@ index 0000000..88403b7
 +    }
 +
 +    public static int getFlags(int account) {
-+        return prefs().getInt("work_flags_" + account, DEFAULT_FLAGS);
++        // Ключ сменён намеренно: прежний по умолчанию включал все личные переписки.
++        return prefs().getInt("work_flags2_" + account, DEFAULT_FLAGS);
 +    }
 +
 +    public static void setSelection(int account, ArrayList<Long> ids, int flags) {
@@ -171,7 +173,7 @@ index 0000000..88403b7
 +            idsCache[account] = new HashSet<>(ids);
 +            save(account);
 +        }
-+        prefs().edit().putInt("work_flags_" + account, flags & MessagesController.DIALOG_FILTER_FLAG_ALL_CHATS).apply();
++        prefs().edit().putInt("work_flags2_" + account, flags & MessagesController.DIALOG_FILTER_FLAG_ALL_CHATS).apply();
 +        changed(account);
 +    }
 +
@@ -2145,7 +2147,7 @@ index 4429525..8fdaa4e 100644
          GRAM(R.raw.gram, R.raw.gram_reverse),
  
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java
-index 48ec85b..baca37c 100644
+index 48ec85b..f5b362d 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java
 @@ -544,6 +544,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
@@ -2195,7 +2197,17 @@ index 48ec85b..baca37c 100644
              folderId == 0 && communityId == 0 && TextUtils.isEmpty(searchString)
          ) {
              filterTabsView = new FilterTabsView(context, resourceProvider) {
-@@ -8770,6 +8775,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -7020,6 +7025,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+     @Override
+     public void onResume() {
+         super.onResume();
++        if (workMode) {
++            org.telegram.ui.teledelta.TeleDeltaWorkUi.onWorkTabResumed(this);
++        }
+         if (dialogStoriesCell != null) {
+             dialogStoriesCell.onResume();
+         }
+@@ -8770,6 +8778,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
              previewMenu[0].addView(unpinItem);
          }
  
@@ -2206,7 +2218,7 @@ index 48ec85b..baca37c 100644
          if (!DialogObject.isUserDialog(dialogId) || !UserObject.isUserSelf(getMessagesController().getUser(dialogId))) {
              ActionBarMenuSubItem muteItem = new ActionBarMenuSubItem(getParentActivity(), false, false);
              if (!getMessagesController().isDialogMuted(dialogId, 0)) {
-@@ -8897,7 +8906,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -8897,7 +8909,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
      }
  
      public boolean hasHiddenArchive() {
@@ -2215,7 +2227,7 @@ index 48ec85b..baca37c 100644
      }
  
      private boolean waitingForDialogsAnimationEnd(ViewPage viewPage) {
-@@ -10994,6 +11003,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -10994,6 +11006,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
              return frozenDialogsList;
          }
          MessagesController messagesController = AccountInstance.getInstance(currentAccount).getMessagesController();
@@ -2225,7 +2237,7 @@ index 48ec85b..baca37c 100644
          if (dialogsType == DIALOGS_TYPE_DEFAULT) {
              return messagesController.getDialogs(folderId);
          } else if (dialogsType == DIALOGS_TYPE_WIDGET || dialogsType == DIALOGS_TYPE_IMPORT_HISTORY) {
-@@ -12796,9 +12808,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -12796,9 +12811,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
          if (StoryRecorder.isVisible() || (getLastStoryViewer() != null && getLastStoryViewer().isFullyVisible())) {
              animated = false;
          }
@@ -2237,7 +2249,7 @@ index 48ec85b..baca37c 100644
              newVisibility = false;
          } else if (isArchive()) {
              newVisibility = !getStoriesController().getHiddenList().isEmpty();
-@@ -13677,6 +13689,13 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
+@@ -13677,6 +13692,13 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
          io.setColors(getThemedColor(Theme.key_actionBarDefaultTitle), getThemedColor(Theme.key_actionBarDefaultTitle));
          io.setDimAlpha(0x08);
  
@@ -2736,10 +2748,10 @@ index 0000000..7c02a10
 +}
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/teledelta/TeleDeltaWorkUi.java b/TMessagesProj/src/main/java/org/telegram/ui/teledelta/TeleDeltaWorkUi.java
 new file mode 100644
-index 0000000..73bf5f4
+index 0000000..f97b6c6
 --- /dev/null
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/teledelta/TeleDeltaWorkUi.java
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,107 @@
 +package org.telegram.ui.teledelta;
 +
 +import org.telegram.messenger.R;
@@ -2782,12 +2794,36 @@ index 0000000..73bf5f4
 +        });
 +    }
 +
++    private static boolean emptyHintShown;
++
++    /** Пустая «Работа» — подсказать один раз за запуск, как её наполнить. */
++    public static void onWorkTabResumed(DialogsActivity fragment) {
++        if (emptyHintShown || fragment.getParentActivity() == null) {
++            return;
++        }
++        final int account = fragment.getCurrentAccount();
++        if (!TeleDeltaWork.getIds(account).isEmpty()) {
++            return;
++        }
++        emptyHintShown = true;
++        org.telegram.messenger.AndroidUtilities.runOnUIThread(() -> {
++            if (fragment.getParentActivity() == null) {
++                return;
++            }
++            BulletinFactory.of(fragment).createSimpleBulletin(R.raw.chats_infotip,
++                    "«Работа» пуста. Добавьте чаты: ⋮ → «Выбрать рабочие чаты» или долгое нажатие на чат",
++                    "Выбрать", () -> openPicker(fragment)).show();
++        }, 600);
++    }
++
 +    /** Выбор рабочих чатов — тем же экраном, которым Telegram собирает папки. */
 +    public static void openPicker(BaseFragment fragment) {
 +        final int account = fragment.getCurrentAccount();
 +        UsersSelectActivity picker = new UsersSelectActivity(true, TeleDeltaWork.getIdsList(account), TeleDeltaWork.getFlags(account));
 +        picker.noLimit = true;
-+        picker.setDelegate((ids, flags) -> TeleDeltaWork.setSelection(account, ids, flags));
++        // Без «типов чатов»: в «Работу» попадают только отмеченные по одному группы и люди.
++        picker.noChatTypes = true;
++        picker.setDelegate((ids, flags) -> TeleDeltaWork.setSelection(account, ids, 0));
 +        fragment.presentFragment(picker);
 +    }
 +
@@ -2806,9 +2842,6 @@ index 0000000..73bf5f4
 +            boolean now = TeleDeltaWork.toggle(account, dialogId);
 +            fragment.finishPreviewFragment();
 +            String text = now ? "Чат добавлен в «Работу»" : "Чат убран из «Работы»";
-+            if (!now && TeleDeltaWork.isWork(account, dialogId)) {
-+                text = "Убран из выбранных, но остаётся в «Работе» как личная переписка";
-+            }
 +            BulletinFactory.of(fragment).createSimpleBulletin(R.raw.contact_check, text).show();
 +        });
 +        menu.addView(workItem);
